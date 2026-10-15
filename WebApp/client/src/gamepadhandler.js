@@ -2,7 +2,7 @@ export class GamepadHandler extends EventTarget {
   constructor() {
     super();
     this._controllers = {};
-    window.requestAnimationFrame(this._updateStatus.bind(this));
+    this._animation = window.requestAnimationFrame(this._updateStatus.bind(this));
   }
 
   /**
@@ -19,6 +19,11 @@ export class GamepadHandler extends EventTarget {
     delete this._controllers[gamepad.index];
   }
 
+  dispose() {
+    window.cancelAnimationFrame(this._animation);
+    this._controllers = {};
+  }
+
   _updateStatus() {
     this._scanGamepad();
     for(let i in this._controllers) {
@@ -29,7 +34,7 @@ export class GamepadHandler extends EventTarget {
         gamepad: controller
       }));
     }
-    window.requestAnimationFrame(this._updateStatus.bind(this));
+    this._animation = window.requestAnimationFrame(this._updateStatus.bind(this));
   }
 
   _scanGamepad() {

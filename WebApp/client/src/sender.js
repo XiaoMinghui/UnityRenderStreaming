@@ -15,6 +15,7 @@ export class Sender extends LocalInputManager {
   constructor(elem) {
     super();
     this._devices = [];
+    this._listeners = [];
     this._elem = elem;
     this._corrector = new PointerCorrector(
       this._elem.videoWidth,
@@ -23,9 +24,22 @@ export class Sender extends LocalInputManager {
       );
 
     //since line 27 cannot complete resize initialization but can only monitor div dimension changes, line 26 needs to be reserved
-    this._elem.addEventListener('resize', this._onResizeEvent.bind(this), false);
-    const observer = new ResizeObserver(this._onResizeEvent.bind(this));
-    observer.observe(this._elem);
+    this._listen(this._elem, 'resize', this._onResizeEvent);
+    this._observer = new ResizeObserver(this._onResizeEvent.bind(this));
+    this._observer.observe(this._elem);
+  }
+
+  _listen(target, name, callback) {
+    const bound = callback.bind(this);
+    target.addEventListener(name, bound, false);
+    this._listeners.push([target, name, bound]);
+  }
+
+  dispose() {
+    this._observer.disconnect();
+    for (const [target, name, callback] of this._listeners) target.removeEventListener(name, callback, false);
+    this._listeners = [];
+    this._gamepadHandler?.dispose();
   }
 
   addMouse() {
@@ -41,11 +55,11 @@ export class Sender extends LocalInputManager {
     this.mouse = new Mouse("Mouse", "Mouse", 1, null, descriptionMouse);
     this._devices.push(this.mouse);
 
-    this._elem.addEventListener('click', this._onMouseEvent.bind(this), false);
-    this._elem.addEventListener('mousedown', this._onMouseEvent.bind(this), false);
-    this._elem.addEventListener('mouseup', this._onMouseEvent.bind(this), false);
-    this._elem.addEventListener('mousemove', this._onMouseEvent.bind(this), false);
-    this._elem.addEventListener('wheel', this._onWheelEvent.bind(this), false);
+    this._listen(this._elem, 'click', this._onMouseEvent);
+    this._listen(this._elem, 'mousedown', this._onMouseEvent);
+    this._listen(this._elem, 'mouseup', this._onMouseEvent);
+    this._listen(this._elem, 'mousemove', this._onMouseEvent);
+    this._listen(this._elem, 'wheel', this._onWheelEvent);
   }
 
   addKeyboard() {
@@ -61,8 +75,8 @@ export class Sender extends LocalInputManager {
     this.keyboard = new Keyboard("Keyboard", "Keyboard", 2, null, descriptionKeyboard);
     this._devices.push(this.keyboard);
 
-    document.addEventListener('keyup', this._onKeyEvent.bind(this), false);
-    document.addEventListener('keydown', this._onKeyEvent.bind(this), false);
+    this._listen(document, 'keyup', this._onKeyEvent);
+    this._listen(document, 'keydown', this._onKeyEvent);
   }
 
   addGamepad() {
@@ -78,10 +92,10 @@ export class Sender extends LocalInputManager {
     this.gamepad = new Gamepad("Gamepad", "Gamepad", 3, null, descriptionGamepad);
     this._devices.push(this.gamepad);
 
-    window.addEventListener("gamepadconnected", this._onGamepadEvent.bind(this), false);
-    window.addEventListener("gamepaddisconnected", this._onGamepadEvent.bind(this), false);
+    this._listen(window, "gamepadconnected", this._onGamepadEvent);
+    this._listen(window, "gamepaddisconnected", this._onGamepadEvent);
     this._gamepadHandler = new GamepadHandler();
-    this._gamepadHandler.addEventListener("gamepadupdated", this._onGamepadEvent.bind(this), false);
+    this._listen(this._gamepadHandler, "gamepadupdated", this._onGamepadEvent);
   }
 
   addTouchscreen() {
@@ -97,11 +111,11 @@ export class Sender extends LocalInputManager {
     this.touchscreen = new Touchscreen("Touchscreen", "Touchscreen", 4, null, descriptionTouch);
     this._devices.push(this.touchscreen);
 
-    this._elem.addEventListener('touchend', this._onTouchEvent.bind(this), false);
-    this._elem.addEventListener('touchstart', this._onTouchEvent.bind(this), false);
-    this._elem.addEventListener('touchcancel', this._onTouchEvent.bind(this), false);
-    this._elem.addEventListener('touchmove', this._onTouchEvent.bind(this), false);
-    this._elem.addEventListener('click', this._onTouchEvent.bind(this), false);
+    this._listen(this._elem, 'touchend', this._onTouchEvent);
+    this._listen(this._elem, 'touchstart', this._onTouchEvent);
+    this._listen(this._elem, 'touchcancel', this._onTouchEvent);
+    this._listen(this._elem, 'touchmove', this._onTouchEvent);
+    this._listen(this._elem, 'click', this._onTouchEvent);
   }
 
   /**

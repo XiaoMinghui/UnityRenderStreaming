@@ -9,6 +9,8 @@ namespace Unity.RenderStreaming
     /// </summary>
     public abstract class DataChannelBase : MonoBehaviour, IDataChannel
     {
+        private DelegateOnOpen channelOpened;
+        private DelegateOnClose channelClosed;
         internal const string LocalPropertyName = nameof(local);
         internal const string LabelPropertyName = nameof(label);
 
@@ -65,6 +67,13 @@ namespace Unity.RenderStreaming
         /// <param name="channel"></param>
         public virtual void SetChannel(string connectionId, RTCDataChannel channel)
         {
+            if (ReferenceEquals(Channel, channel)) return;
+            if (Channel != null)
+            {
+                Channel.OnOpen -= channelOpened;
+                Channel.OnClose -= channelClosed;
+                Channel.OnMessage -= OnMessage;
+            }
             Channel = channel;
             if (Channel == null)
             {
@@ -75,8 +84,10 @@ namespace Unity.RenderStreaming
 
             ConnectionId = connectionId;
             label = Channel.Label;
-            Channel.OnOpen += () => { OnOpen(connectionId); };
-            Channel.OnClose += () => { OnClose(connectionId); };
+            channelOpened = () => { if (ReferenceEquals(Channel, channel)) OnOpen(connectionId); };
+            channelClosed = () => { if (ReferenceEquals(Channel, channel)) OnClose(connectionId); };
+            Channel.OnOpen += channelOpened;
+            Channel.OnClose += channelClosed;
             Channel.OnMessage += OnMessage;
 
             if (Channel.ReadyState == RTCDataChannelState.Open && !IsLocal)

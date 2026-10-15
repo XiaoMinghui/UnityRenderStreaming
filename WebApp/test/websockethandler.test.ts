@@ -4,6 +4,11 @@ import Candidate from "../src/class/candidate";
 import Offer from "../src/class/offer";
 import * as wsHandler from '../src/class/websockethandler';
 
+// Node 22 exposes a getter-only WebSocket global; mock-socket replaces it.
+Object.defineProperty(globalThis, 'WebSocket', {
+  value: globalThis.WebSocket, configurable: true, writable: true
+});
+
 Date.now = jest.fn(() => 1482363367071);
 
 describe('websocket signaling test in public mode', () => {

@@ -61,7 +61,7 @@ The Rokid project remains under Plastic SCM; this shared source is versioned in 
 
 Changing `WebApp/` does not update an already deployed `webserver.exe`. Install the WebApp dependencies for this source version, build it, and deploy the resulting server/browser application. Package updates and server deployment are distinct steps and must use a compatible protocol version.
 
-The Rokid project's existing `Tools/RenderStreamingWebApp/webserver.exe` remains its previously tested binary until a new shared-server build has been tested and deployed. It has not gained heartbeat support from this repository setup alone.
+Run `powershell -ExecutionPolicy Bypass -File Tools/Start-Server.ps1 -Port 8080` with Node.js 22 and npm installed. The launcher installs locked dependencies when missing, builds TypeScript, then serves this checkout's browser files in WebSocket/public mode. The Rokid project launcher delegates here. The retained legacy `webserver.exe` does not contain these fixes; do not launch it for this workflow.
 
 ## Updating the source
 
@@ -77,3 +77,13 @@ Keep upstream updates separate, inspect them and merge or cherry-pick deliberate
 The initial local checkout uses Git sparse checkout for the package, WebApp, Tools and root documentation. The complete fork is available remotely. Use `git sparse-checkout disable` if the other upstream sample projects or templates are needed.
 
 Upstream licenses and notices remain in this repository and in the Unity package.
+
+## Connection reliability (2026-10-15)
+
+- Server sends protocol Ping every 20 seconds, terminating a socket after three unanswered probes (about 60–80 seconds depending on the failure instant). Browsers answer these frames automatically. Browser application Ping/Pong runs every 15 seconds with a 45-second timeout so the page can detect a half-open socket too.
+- Unity's single SDK worker sends protocol Ping every 15 seconds, allows 3 seconds for Pong and retries after 5 seconds. Stop cancels retries and stale queued callbacks. `ConnectionState`/`IsConnected` describe signaling; they do not assert that video is playing. On a new socket the manager releases old peers and handler registrations.
+- ReceiverSession owns one retry timer with 1/2/4/8/15-second backoff and jitter. Retries create a fresh signaling socket, peer and input channel; input event listeners, gamepad polling and old tracks are disposed. Returning from the background starts a fresh session.
+- First decoded, playing video must arrive within 30 seconds. Once playing, 8 seconds without decoded-frame progress triggers recreation; received-frame progress distinguishes loss of data from stalled decoding. Hidden tabs skip frame deadlines to avoid browser throttling false positives. These thresholds are constructor options on ReceiverSession.
+- Rokid-specific pause/resume belongs in the consuming project: pause stops its runtime, resume restores only a previously requested stream. Explicit Stop prevents resume from starting it again. It uses this SDK's retries without a second Unity reconnect loop.
+
+Validation: `cd WebApp; npm ci; npm run build; npm test -- --runInBand`. Node 22 compatibility for the upstream mock WebSocket tests is included. Live Chrome/Unity checks covered a 1280x720 stream, forced browser socket closure, server restart, three pause/resume cycles and injected receive/decode stalls. Each recovery had one live browser socket and one Unity manager/camera. Android builds and physical-device retesting are outside this validation.

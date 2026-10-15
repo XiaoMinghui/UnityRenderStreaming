@@ -10,6 +10,9 @@ export class VideoPlayer {
     this.inputRemoting = null;
     this.sender = null;
     this.inputSenderChannel = null;
+    this._boundFullscreen = this._onFullscreenChange.bind(this);
+    this._boundMove = this._mouseMove.bind(this);
+    this._boundClick = this._mouseClickFullScreen.bind(this);
   }
 
   /**
@@ -35,8 +38,8 @@ export class VideoPlayer {
     this.fullScreenButtonElement.addEventListener("click", this._onClickFullscreenButton.bind(this));
     this.playerElement.appendChild(this.fullScreenButtonElement);
 
-    document.addEventListener('webkitfullscreenchange', this._onFullscreenChange.bind(this));
-    document.addEventListener('fullscreenchange', this._onFullscreenChange.bind(this));
+    document.addEventListener('webkitfullscreenchange', this._boundFullscreen);
+    document.addEventListener('fullscreenchange', this._boundFullscreen);
     this.videoElement.addEventListener("click", this._mouseClick.bind(this), false);
   }
 
@@ -77,16 +80,16 @@ export class VideoPlayer {
         }
 
         // Subscribe to events
-        document.addEventListener('mousemove', this._mouseMove.bind(this), false);
-        document.addEventListener('click', this._mouseClickFullScreen.bind(this), false);
+        document.addEventListener('mousemove', this._boundMove, false);
+        document.addEventListener('click', this._boundClick, false);
       }
     }
     else {
       this.playerElement.style.position = "relative";
       this.fullScreenButtonElement.style.display = 'block';
 
-      document.removeEventListener('mousemove', this._mouseMove.bind(this), false);
-      document.removeEventListener('click', this._mouseClickFullScreen.bind(this), false);
+      document.removeEventListener('mousemove', this._boundMove, false);
+      document.removeEventListener('click', this._boundClick, false);
     }
   }
 
@@ -166,6 +169,13 @@ export class VideoPlayer {
   }
 
   deletePlayer() {
+    document.removeEventListener("fullscreenchange", this._boundFullscreen);
+    document.removeEventListener("webkitfullscreenchange", this._boundFullscreen);
+    document.removeEventListener("mousemove", this._boundMove, false);
+    document.removeEventListener("click", this._boundClick, false);
+    if (this.inputSenderChannel) this.inputSenderChannel.onopen = null;
+    this.videoElement?.srcObject?.getTracks().forEach(track => track.stop());
+    this.sender?.dispose();
     if (this.inputRemoting) {
       this.inputRemoting.stopSending();
     }
@@ -173,11 +183,12 @@ export class VideoPlayer {
     this.sender = null;
     this.inputSenderChannel = null;
 
-    while (this.playerElement.firstChild) {
+    while (this.playerElement?.firstChild) {
       this.playerElement.removeChild(this.playerElement.firstChild);
     }
 
     this.playerElement = null;
+    this.videoElement = null;
     this.lockMouseCheck = null;
   }
 
@@ -207,7 +218,8 @@ export class VideoPlayer {
   }
 
   async _onOpenInputSenderChannel() {
+    const channel = this.inputSenderChannel;
     await new Promise(resolve => setTimeout(resolve, 100));
-    this.inputRemoting.startSending();
+    if (this.inputSenderChannel === channel && channel?.readyState === "open") this.inputRemoting?.startSending();
   }
 }

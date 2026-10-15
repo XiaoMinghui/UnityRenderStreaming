@@ -329,6 +329,10 @@ namespace Unity.RenderStreaming
 
         void OnStart(ISignaling signaling)
         {
+            // A new WebSocket has no registrations from its predecessor.
+            // Release old peers and notify handlers before accepting fresh offers.
+            foreach (var id in _mapConnectionIdAndPeer.Keys.ToArray())
+                DestroyConnection(id);
             if (!_runningResendCoroutine)
             {
                 _runningResendCoroutine = true;

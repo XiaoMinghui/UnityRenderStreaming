@@ -150,14 +150,27 @@ export class WebSocketSignaling extends EventTarget {
 
     this.websocket.onopen = () => {
       this.isWsOpen = true;
+      this._lastPong = performance.now();
+      this._heartbeat = setInterval(() => {
+        if (performance.now() - this._lastPong > 45000) {
+          this.websocket.close(4000, 'Heartbeat timeout');
+          return;
+        }
+        this._send({ type: 'ping', id: Date.now() });
+      }, 15000);
     };
 
     this.websocket.onclose = () => {
       this.isWsOpen = false;
+      clearInterval(this._heartbeat);
+      if (!this._stopped) this.dispatchEvent(new Event('close'));
     };
+    this.websocket.onerror = () => this.dispatchEvent(new Event('error'));
 
     this.websocket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (_) { return; }
+      if (msg.type === 'pong') { this._lastPong = performance.now(); return; }
       if (!msg || !this) {
         return;
       }
@@ -180,6 +193,9 @@ export class WebSocketSignaling extends EventTarget {
         case "candidate":
           this.dispatchEvent(new CustomEvent('candidate', { detail: { connectionId: msg.from, candidate: msg.data.candidate, sdpMLineIndex: msg.data.sdpMLineIndex, sdpMid: msg.data.sdpMid } }));
           break;
+        case 'error':
+          this.dispatchEvent(new CustomEvent('servererror', { detail: msg }));
+          break;
         default:
           break;
       }
@@ -187,42 +203,49 @@ export class WebSocketSignaling extends EventTarget {
   }
 
   async start() {
+    const deadline = performance.now() + 10000;
     while (!this.isWsOpen) {
+      if (this._stopped || this.websocket.readyState >= WebSocket.CLOSING || performance.now() > deadline)
+        throw new Error('无法连接信令服务器，请检查服务器和网络');
       await this.sleep(100);
     }
   }
 
   async stop() {
+    this._stopped = true;
+    clearInterval(this._heartbeat);
+    this.isWsOpen = false;
     this.websocket.close();
-    while (this.isWsOpen) {
-      await this.sleep(100);
-    }
+  }
+
+  _send(message) {
+    if (this.websocket.readyState === WebSocket.OPEN) this.websocket.send(JSON.stringify(message));
   }
 
   createConnection(connectionId) {
     const sendJson = JSON.stringify({ type: "connect", connectionId: connectionId });
     Logger.log(sendJson);
-    this.websocket.send(sendJson);
+    this._send(JSON.parse(sendJson));
   }
 
   deleteConnection(connectionId) {
     const sendJson = JSON.stringify({ type: "disconnect", connectionId: connectionId });
     Logger.log(sendJson);
-    this.websocket.send(sendJson);
+    this._send(JSON.parse(sendJson));
   }
 
   sendOffer(connectionId, sdp) {
     const data = { 'sdp': sdp, 'connectionId': connectionId };
     const sendJson = JSON.stringify({ type: "offer", from: connectionId, data: data });
     Logger.log(sendJson);
-    this.websocket.send(sendJson);
+    this._send(JSON.parse(sendJson));
   }
 
   sendAnswer(connectionId, sdp) {
     const data = { 'sdp': sdp, 'connectionId': connectionId };
     const sendJson = JSON.stringify({ type: "answer", from: connectionId, data: data });
     Logger.log(sendJson);
-    this.websocket.send(sendJson);
+    this._send(JSON.parse(sendJson));
   }
 
   sendCandidate(connectionId, candidate, sdpMLineIndex, sdpMid) {
@@ -234,6 +257,6 @@ export class WebSocketSignaling extends EventTarget {
     };
     const sendJson = JSON.stringify({ type: "candidate", from: connectionId, data: data });
     Logger.log(sendJson);
-    this.websocket.send(sendJson);
+    this._send(JSON.parse(sendJson));
   }
 }

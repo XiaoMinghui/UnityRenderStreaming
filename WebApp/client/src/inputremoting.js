@@ -76,11 +76,11 @@ export class InputRemoting {
     }
     this._sending = true;
 
-    const onEvent = e => {
+    const onEvent = this._onEvent = e => {
       this._sendEvent(e.detail.event);
     };
 
-    const onDeviceChange = e => {
+    const onDeviceChange = this._onDeviceChange = e => {
       this._sendDeviceChange(e.detail.device, e.detail.change);
     };
 
@@ -95,6 +95,8 @@ export class InputRemoting {
       return;
     }
     this._sending = false;
+    this._localManager.onEvent.removeEventListener("event", this._onEvent);
+    this._localManager.onEvent.removeEventListener("changedeviceusage", this._onDeviceChange);
   }
 
   /**

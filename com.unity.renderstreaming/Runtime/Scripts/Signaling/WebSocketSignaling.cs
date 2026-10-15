@@ -1,6 +1,5 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Diagnostics;
 using System.Security.Authentication;
 using System.Text;
 using System.Threading;
@@ -10,16 +9,23 @@ using WebSocketSharp;
 
 namespace Unity.RenderStreaming.Signaling
 {
+    public enum SignalingConnectionState { Stopped, Connecting, Connected, Reconnecting }
+
     public class WebSocketSignaling : ISignaling
     {
-        private static HashSet<WebSocketSignaling> instances = new HashSet<WebSocketSignaling>();
 
         private readonly string m_url;
         private readonly float m_timeout;
         private readonly SynchronizationContext m_mainThreadContext;
-        private bool m_running;
+        private volatile bool m_running;
+        private int m_generation;
+        private volatile SignalingConnectionState m_state;
+        public SignalingConnectionState ConnectionState => m_state;
+        public bool IsConnected => m_state == SignalingConnectionState.Connected;
+        public event Action<SignalingConnectionState> StateChanged;
         private Thread m_signalingThread;
         private readonly AutoResetEvent m_wsCloseEvent;
+        private readonly object m_socketGate = new object();
         private WebSocket m_webSocket;
 
         public string Url { get { return m_url; } }
@@ -35,49 +41,55 @@ namespace Unity.RenderStreaming.Signaling
             m_mainThreadContext = mainThreadContext;
             m_wsCloseEvent = new AutoResetEvent(false);
 
-            if (instances.Any(x => x.Url == m_url))
-            {
-                RenderStreaming.Logger.Log(LogType.Warning, $"Other {nameof(WebSocketSignaling)} exists with same URL:{m_url}. Signaling process may be in conflict.");
-            }
-
-            instances.Add(this);
-        }
-
-        ~WebSocketSignaling()
-        {
-            if (m_running)
-                Stop();
-
-            instances.Remove(this);
         }
 
         public void Start()
         {
-            if (m_running)
-                throw new InvalidOperationException("This object is already started.");
+            if (m_running) throw new InvalidOperationException("This object is already started.");
             m_running = true;
-            m_signalingThread = new Thread(WSManage);
+            int generation = Interlocked.Increment(ref m_generation);
+            m_wsCloseEvent.Reset();
+            m_signalingThread = new Thread(() => WSManage(generation)) {
+                IsBackground = true, Name = "Render Streaming signaling"
+            };
             m_signalingThread.Start();
         }
 
-
         public void Stop()
         {
-            if (m_running)
+            WebSocket socket;
+            int generation;
+            lock (m_socketGate)
             {
                 m_running = false;
-                m_webSocket?.Close();
-
-                if (m_signalingThread.ThreadState == ThreadState.WaitSleepJoin)
-                {
-                    m_signalingThread.Abort();
-                }
-                else
-                {
-                    m_signalingThread.Join(1000);
-                }
-                m_signalingThread = null;
+                generation = Interlocked.Increment(ref m_generation);
+                m_wsCloseEvent.Set();
+                socket = m_webSocket;
+                m_webSocket = null;
             }
+            try { socket?.CloseAsync(); } catch (Exception) { }
+            var thread = m_signalingThread;
+            if (thread != null && thread != Thread.CurrentThread) thread.Join(1000);
+            m_signalingThread = null;
+            SetState(SignalingConnectionState.Stopped, generation);
+        }
+
+        private void SetState(SignalingConnectionState state, int generation)
+        {
+            if (generation != Volatile.Read(ref m_generation) || m_state == state) return;
+            m_state = state;
+            m_mainThreadContext.Post(_ => {
+                if (generation == Volatile.Read(ref m_generation)) StateChanged?.Invoke(state);
+            }, null);
+        }
+
+        private void Dispatch(Action action, object socket)
+        {
+            int generation = Volatile.Read(ref m_generation);
+            m_mainThreadContext.Post(_ => {
+                if (m_running && generation == Volatile.Read(ref m_generation) &&
+                    ReferenceEquals(socket, m_webSocket)) action();
+            }, null);
         }
 
         public event OnStartHandler OnStart;
@@ -146,50 +158,74 @@ namespace Unity.RenderStreaming.Signaling
             this.WSSend($"{{\"type\":\"disconnect\", \"connectionId\":\"{connectionId}\"}}");
         }
 
-        private void WSManage()
+        private void WSManage(int generation)
         {
-            while (m_running)
+            bool first = true;
+            while (m_running && generation == Volatile.Read(ref m_generation))
             {
-                WSCreate();
-
+                SetState(first ? SignalingConnectionState.Connecting : SignalingConnectionState.Reconnecting, generation);
+                first = false;
+                WebSocket socket = null;
                 try
                 {
-                    m_wsCloseEvent.WaitOne();
-
-                    Thread.Sleep((int)(m_timeout * 1000));
+                    m_wsCloseEvent.Reset();
+                    socket = new WebSocket(m_url) { WaitTime = TimeSpan.FromSeconds(3) };
+                    if (m_url.StartsWith("wss"))
+                        socket.SslConfiguration.EnabledSslProtocols = SslProtocols.Tls12;
+                    socket.OnOpen += WSConnected;
+                    socket.OnMessage += WSProcessMessage;
+                    socket.OnError += WSError;
+                    socket.OnClose += WSClosed;
+                    lock (m_socketGate)
+                    {
+                        if (!m_running || generation != Volatile.Read(ref m_generation)) break;
+                        m_webSocket = socket;
+                    }
+                    socket.ConnectAsync();
+                    var elapsed = Stopwatch.StartNew();
+                    double lastPing = 0;
+                    while (m_running && generation == Volatile.Read(ref m_generation))
+                    {
+                        if (m_wsCloseEvent.WaitOne(500)) break;
+                        if (socket.ReadyState == WebSocketState.Open)
+                        {
+                            if (elapsed.Elapsed.TotalSeconds - lastPing >= 15)
+                            {
+                                lastPing = elapsed.Elapsed.TotalSeconds;
+                                if (!socket.Ping()) break;
+                            }
+                        }
+                        else if (socket.ReadyState == WebSocketState.Closed || elapsed.Elapsed.TotalSeconds >= 10)
+                            break;
+                    }
                 }
-                catch (ThreadAbortException)
+                catch (Exception error)
                 {
-                    // Thread.Abort() called from main thread. Ignore
-                    return;
+                    RenderStreaming.Logger.Log(LogType.Warning, "Signaling connection: " + error.Message);
                 }
+                finally
+                {
+                    lock (m_socketGate)
+                        if (ReferenceEquals(m_webSocket, socket)) m_webSocket = null;
+                    if (socket != null)
+                    {
+                        socket.OnOpen -= WSConnected;
+                        socket.OnMessage -= WSProcessMessage;
+                        socket.OnError -= WSError;
+                        socket.OnClose -= WSClosed;
+                        try { socket.CloseAsync(); } catch (Exception) { }
+                    }
+                }
+                if (!m_running || generation != Volatile.Read(ref m_generation)) break;
+                SetState(SignalingConnectionState.Reconnecting, generation);
+                // Interruptible delay. Stop wakes this single worker; no second retry loop is needed.
+                m_wsCloseEvent.WaitOne((int)(m_timeout * 1000));
             }
-
-            RenderStreaming.Logger.Log("Signaling: WS managing thread ended");
-        }
-
-        private void WSCreate()
-        {
-            m_webSocket = new WebSocket(m_url);
-            if (m_url.StartsWith("wss"))
-            {
-                m_webSocket.SslConfiguration.EnabledSslProtocols =
-                    SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12;
-            }
-
-            m_webSocket.OnOpen += WSConnected;
-            m_webSocket.OnMessage += WSProcessMessage;
-            m_webSocket.OnError += WSError;
-            m_webSocket.OnClose += WSClosed;
-
-            Monitor.Enter(m_webSocket);
-
-            RenderStreaming.Logger.Log($"Signaling: Connecting WS {m_url}");
-            m_webSocket.ConnectAsync();
         }
 
         private void WSProcessMessage(object sender, MessageEventArgs e)
         {
+            if (!m_running || !ReferenceEquals(sender, m_webSocket) || !e.IsText) return;
             var content = Encoding.UTF8.GetString(e.RawData);
             RenderStreaming.Logger.Log($"Signaling: Receiving message: {content}");
 
@@ -212,12 +248,12 @@ namespace Unity.RenderStreaming.Signaling
                     if (routedMessage.type == "connect")
                     {
                         msg = JsonUtility.FromJson<SignalingMessage>(content);
-                        m_mainThreadContext.Post(d => OnCreateConnection?.Invoke(this, msg.connectionId, msg.polite), null);
+                        Dispatch(() => OnCreateConnection?.Invoke(this, msg.connectionId, msg.polite), sender);
                     }
                     else if (routedMessage.type == "disconnect")
                     {
                         msg = JsonUtility.FromJson<SignalingMessage>(content);
-                        m_mainThreadContext.Post(d => OnDestroyConnection?.Invoke(this, msg.connectionId), null);
+                        Dispatch(() => OnDestroyConnection?.Invoke(this, msg.connectionId), sender);
                     }
                     else if (routedMessage.type == "offer")
                     {
@@ -225,7 +261,7 @@ namespace Unity.RenderStreaming.Signaling
                         offer.connectionId = routedMessage.from;
                         offer.sdp = msg.sdp;
                         offer.polite = msg.polite;
-                        m_mainThreadContext.Post(d => OnOffer?.Invoke(this, offer), null);
+                        Dispatch(() => OnOffer?.Invoke(this, offer), sender);
                     }
                     else if (routedMessage.type == "answer")
                     {
@@ -234,7 +270,7 @@ namespace Unity.RenderStreaming.Signaling
                             connectionId = routedMessage.from,
                             sdp = msg.sdp
                         };
-                        m_mainThreadContext.Post(d => OnAnswer?.Invoke(this, answer), null);
+                        Dispatch(() => OnAnswer?.Invoke(this, answer), sender);
                     }
                     else if (routedMessage.type == "candidate")
                     {
@@ -245,7 +281,7 @@ namespace Unity.RenderStreaming.Signaling
                             sdpMLineIndex = msg.sdpMLineIndex,
                             sdpMid = msg.sdpMid
                         };
-                        m_mainThreadContext.Post(d => OnIceCandidate?.Invoke(this, candidate), null);
+                        Dispatch(() => OnIceCandidate?.Invoke(this, candidate), sender);
                     }
                     else if (routedMessage.type == "error")
                     {
@@ -262,42 +298,39 @@ namespace Unity.RenderStreaming.Signaling
 
         private void WSConnected(object sender, EventArgs e)
         {
+            if (!m_running || !ReferenceEquals(sender, m_webSocket)) return;
+            SetState(SignalingConnectionState.Connected, Volatile.Read(ref m_generation));
             RenderStreaming.Logger.Log("Signaling: WS connected.");
-            m_mainThreadContext.Post(d => OnStart?.Invoke(this), null);
+            Dispatch(() => OnStart?.Invoke(this), sender);
         }
 
 
         private void WSError(object sender, ErrorEventArgs e)
         {
-            RenderStreaming.Logger.Log(LogType.Error, $"Signaling: WS connection error: {e.Message}");
+            if (!ReferenceEquals(sender, m_webSocket)) return;
+            RenderStreaming.Logger.Log(LogType.Warning, $"Signaling: WS connection error: {e.Message}");
+            m_wsCloseEvent.Set();
         }
 
         private void WSClosed(object sender, CloseEventArgs e)
         {
             RenderStreaming.Logger.Log($"Signaling: WS connection closed, code: {e.Code}");
 
-            m_wsCloseEvent.Set();
-            m_webSocket = null;
+            if (ReferenceEquals(sender, m_webSocket)) m_wsCloseEvent.Set();
         }
 
         private void WSSend(object data)
         {
-            if (m_webSocket == null || m_webSocket.ReadyState != WebSocketState.Open)
+            var socket = m_webSocket;
+            if (socket == null || socket.ReadyState != WebSocketState.Open) return;
+            try
             {
-                RenderStreaming.Logger.Log(LogType.Error, "Signaling: WS is not connected. Unable to send message");
-                return;
+                socket.Send(data is string text ? text : JsonUtility.ToJson(data));
             }
-
-            if (data is string s)
+            catch (Exception error)
             {
-                RenderStreaming.Logger.Log("Signaling: Sending WS data: " + s);
-                m_webSocket.Send(s);
-            }
-            else
-            {
-                string str = JsonUtility.ToJson(data);
-                RenderStreaming.Logger.Log("Signaling: Sending WS data: " + str);
-                m_webSocket.Send(str);
+                RenderStreaming.Logger.Log(LogType.Warning, "Signaling send failed: " + error.Message);
+                if (ReferenceEquals(socket, m_webSocket)) m_wsCloseEvent.Set();
             }
         }
     }

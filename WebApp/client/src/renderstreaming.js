@@ -146,7 +146,7 @@ export class RenderStreaming {
    * @returns {Promise<RTCStatsReport> | null}
    */
   async getStats() {
-    return await this._peer.getStats(this._connectionId);
+    return this._peer ? await this._peer.getStats(this._connectionId) : null;
   }
 
   /**
