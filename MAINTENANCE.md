@@ -104,3 +104,15 @@ npm run test:receiver
 ```
 
 The suite checks loading through input connection without a video frame, automatic playback, aspect-preserving portrait layout/pointer mapping, enter/exit fullscreen, three reconnections, remote input, receive/decode freeze recovery, denied-autoplay recovery and server-configuration failure recovery. Test output is printed to the terminal; build artifacts, dependencies and test logs stay out of Git.
+
+## Native Unity receiver
+
+`StreamingReceiver` provides an application-independent native receiver for the WebSocket/Public signaling and Broadcast sender workflow. It creates one video/audio/input session automatically, reuses the SDK's signaling heartbeat/retry worker, and recreates failed media/input sessions with bounded backoff. Pause releases its runtime; resume restores only a previously requested receiver. Explicit Stop remains stopped after resume.
+
+Set `SignalingUrl` before starting (or call `Retry()` after changing it). Use `StartReceiving()`, `StopReceiving()` and `Retry()` for application control. `StateChanged`, `TextureUpdated`, `Texture`, `DecodedFrames` and `IsInputConnected` expose status and media to a consuming project's view. Call `SetInputRegion(screenRect, videoSize)` with the actual aspect-fitted image rectangle to map mouse/primary-touch coordinates into source video pixels. The current SDK position corrector supports a primary pointer; applications needing richer gestures must implement their input policy separately.
+
+The view, server address, scenes and platform configuration belong to the consuming project. Configure a project-owned `RenderStreamingSettings` asset with `automaticStreaming = false`, register it in EditorBuildSettings, and preload it for players; otherwise the SDK automatic broadcaster can create an additional manager. Do not edit the shared package's default settings asset to configure one application. See the package/WebRTC platform requirements for supported native targets.
+
+Video health polls the receiver's inbound RTP statistics once per second. Increasing `framesDecoded` updates the last-frame time; `bytesReceived` distinguishes reception loss from stalled decoding. `VideoStreamTrack.OnVideoReceived` announces the first texture or a texture resize, so it must not be treated as a per-frame heartbeat. Default deadlines are 30 seconds for the first decoded/visible frame and 8 seconds without decode progress.
+
+Native receiver validation used two Unity 2022.3 editors with a real 1280x720 stream at approximately 30 fps, primary-touch input over DataChannel, three pause/resume cycles, explicit Stop followed by resume, and signaling-server restart recovery. Each recovered receiver had one manager. These are editor interoperability checks; no Android package or physical-device validation is implied.

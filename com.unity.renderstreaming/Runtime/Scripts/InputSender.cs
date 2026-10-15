@@ -16,6 +16,15 @@ namespace Unity.RenderStreaming
         private InputRemoting senderInput;
         private IDisposable suscriberDisposer;
 
+        /// <summary>Configure a local input channel before creating a connection.</summary>
+        public void ConfigureInputChannel(string channelLabel = "input")
+        {
+            if (Channel != null) throw new InvalidOperationException("Input channel is already assigned.");
+            if (string.IsNullOrEmpty(channelLabel)) throw new ArgumentException(nameof(channelLabel));
+            local = true;
+            label = channelLabel;
+        }
+
         /// <summary>
         /// Sets the RTCDataChannel for the sender.
         /// </summary>
@@ -36,11 +45,10 @@ namespace Unity.RenderStreaming
         /// <param name="channel">The RTCDataChannel to set.</param>
         public override void SetChannel(string connectionId, RTCDataChannel channel)
         {
-            if (channel == null)
-            {
-                Dispose();
-            }
-            else
+            if (ReferenceEquals(Channel, channel)) return;
+            DetachChannel();
+            Dispose();
+            if (channel != null)
             {
                 sender = new Sender();
                 senderInput = new InputRemoting(sender);
@@ -49,6 +57,7 @@ namespace Unity.RenderStreaming
                 channel.OnClose += OnClose;
             }
             base.SetChannel(connectionId, channel);
+            if (channel != null && channel.ReadyState == RTCDataChannelState.Open) OnOpen();
         }
 
         /// <summary>
@@ -66,7 +75,7 @@ namespace Unity.RenderStreaming
         /// <param name="size">The size of the texture.</param>
         public void CalculateInputResion(Rect region, Vector2Int size)
         {
-            sender.CalculateInputRegion(region, new Rect(Vector2.zero, size));
+            sender?.CalculateInputRegion(region, new Rect(Vector2.zero, size));
         }
 
         /// <summary>
@@ -82,21 +91,29 @@ namespace Unity.RenderStreaming
         /// <param name="enabled">True to enable input position correction, false to disable.</param>
         public void EnableInputPositionCorrection(bool enabled)
         {
-            sender.EnableInputPositionCorrection = enabled;
+            if (sender != null) sender.EnableInputPositionCorrection = enabled;
         }
 
         void OnOpen()
         {
-            senderInput.StartSending();
+            senderInput?.StartSending();
         }
         void OnClose()
         {
-            senderInput.StopSending();
+            senderInput?.StopSending();
         }
 
         protected virtual void OnDestroy()
         {
+            DetachChannel();
             this.Dispose();
+        }
+
+        private void DetachChannel()
+        {
+            if (Channel == null) return;
+            Channel.OnOpen -= OnOpen;
+            Channel.OnClose -= OnClose;
         }
 
         protected void Dispose()
@@ -104,6 +121,8 @@ namespace Unity.RenderStreaming
             senderInput?.StopSending();
             suscriberDisposer?.Dispose();
             sender?.Dispose();
+            senderInput = null;
+            suscriberDisposer = null;
             sender = null;
         }
     }
