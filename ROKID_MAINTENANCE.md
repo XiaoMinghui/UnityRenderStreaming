@@ -87,3 +87,20 @@ Upstream licenses and notices remain in this repository and in the Unity package
 - Rokid-specific pause/resume belongs in the consuming project: pause stops its runtime, resume restores only a previously requested stream. Explicit Stop prevents resume from starting it again. It uses this SDK's retries without a second Unity reconnect loop.
 
 Validation: `cd WebApp; npm ci; npm run build; npm test -- --runInBand`. Node 22 compatibility for the upstream mock WebSocket tests is included. Live Chrome/Unity checks covered a 1280x720 stream, forced browser socket closure, server restart, three pause/resume cycles and injected receive/decode stalls. Each recovery had one live browser socket and one Unity manager/camera. Android builds and physical-device retesting are outside this validation.
+
+## Receiver presentation
+
+Open `/receiver/index.html`. It connects immediately and plays muted inline video automatically. There is no play button in the normal flow. The video fills the viewport using `object-fit: contain`: its aspect ratio and full contents are preserved, with letterboxing when screen and stream ratios differ. Changing the source resolution does not require changing page dimensions. The bottom-right button enters/exits fullscreen and reports unsupported/denied requests without disrupting the stream.
+
+Connection progress uses discrete stages (configuration, signaling, waiting for Rokid, waiting for decoded frames), not a media-download percentage. The overlay hides only when frames are decoded and the video is actually playing. Interruptions restore the overlay with the cause and automatic retry; an immediate retry action is available. A browser policy explicitly denying autoplay shows a “continue playback” action as an exception. See [MDN autoplay behavior](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay) and [fullscreen requirements](https://developer.mozilla.org/en-US/docs/Web/API/Element/requestFullscreen). An embedding iframe/WebView must allow autoplay/fullscreen and provide WebRTC support; its host policy can still restrict these features.
+
+Browser regression suite (real WebSocket, WebRTC, a synthetic canvas sender and Chrome; no Unity required):
+
+```powershell
+cd WebApp
+npm ci
+npm run test:receiver
+# If Chrome is installed elsewhere, set CHROME_PATH to its executable first.
+```
+
+The suite checks loading through input connection without a video frame, automatic playback, aspect-preserving portrait layout/pointer mapping, enter/exit fullscreen, three reconnections, remote input, receive/decode freeze recovery, denied-autoplay recovery and server-configuration failure recovery. Test output is printed to the terminal; build artifacts, dependencies and test logs stay out of Git.

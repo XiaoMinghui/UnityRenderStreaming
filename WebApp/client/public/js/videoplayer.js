@@ -19,7 +19,8 @@ export class VideoPlayer {
  * @param {Element} playerElement parent element for create video player
  * @param {HTMLInputElement} lockMouseCheck use checked propety for lock mouse 
  */
-  createPlayer(playerElement, lockMouseCheck) {
+  createPlayer(playerElement, lockMouseCheck, options = {}) {
+    this.options = options;
     this.playerElement = playerElement;
     this.lockMouseCheck = lockMouseCheck;
 
@@ -27,15 +28,25 @@ export class VideoPlayer {
     this.videoElement.id = 'Video';
     this.videoElement.style.touchAction = 'none';
     this.videoElement.playsInline = true;
+    this.videoElement.autoplay = !!options.autoplay;
+    this.videoElement.muted = !!options.muted;
+    this.videoElement.setAttribute("playsinline", "");
     this.videoElement.srcObject = new MediaStream();
     this.videoElement.addEventListener('loadedmetadata', this._onLoadedVideo.bind(this), true);
     this.playerElement.appendChild(this.videoElement);
 
     // add fullscreen button
-    this.fullScreenButtonElement = document.createElement('img');
+    this.fullScreenButtonElement = document.createElement('button');
+    this.fullScreenButtonElement.type = 'button';
     this.fullScreenButtonElement.id = 'fullscreenButton';
-    this.fullScreenButtonElement.src = '../images/FullScreen.png';
-    this.fullScreenButtonElement.addEventListener("click", this._onClickFullscreenButton.bind(this));
+    this.fullScreenButtonElement.setAttribute('aria-label', '进入全屏');
+    this.fullScreenButtonElement.setAttribute('aria-pressed', 'false');
+    this.fullScreenButtonElement.title = '进入全屏';
+    this.fullScreenButtonElement.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>';
+    this.fullScreenButtonElement.addEventListener('click', event => {
+      event.stopPropagation();
+      this._onClickFullscreenButton();
+    });
     this.playerElement.appendChild(this.fullScreenButtonElement);
 
     document.addEventListener('webkitfullscreenchange', this._boundFullscreen);
@@ -44,64 +55,60 @@ export class VideoPlayer {
   }
 
   _onLoadedVideo() {
-    this.videoElement.play();
+    this.playVideo();
     this.resizeVideo();
   }
 
-  _onClickFullscreenButton() {
-    if (!document.fullscreenElement || !document.webkitFullscreenElement) {
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen();
-      }
-      else if (document.documentElement.webkitRequestFullscreen) {
-        document.documentElement.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
-      } else {
-        if (this.playerElement.style.position == "absolute") {
-          this.playerElement.style.position = "relative";
-        } else {
-          this.playerElement.style.position = "absolute";
-        }
-      }
+  async playVideo() {
+    const video = this.videoElement;
+    if (!video) return false;
+    try { await video.play(); return this.videoElement === video; }
+    catch (error) {
+      if (this.videoElement === video && error.name !== 'AbortError') this.options.onPlaybackError?.(error);
+      return false;
     }
   }
 
-  _onFullscreenChange() {
-    if (document.webkitFullscreenElement || document.fullscreenElement) {
-      this.playerElement.style.position = "absolute";
-      this.fullScreenButtonElement.style.display = 'none';
-
-      if (this.lockMouseCheck.checked) {
-        if (document.webkitFullscreenElement.requestPointerLock) {
-          document.webkitFullscreenElement.requestPointerLock();
-        } else if (document.fullscreenElement.requestPointerLock) {
-          document.fullscreenElement.requestPointerLock();
-        } else if (document.mozFullScreenElement.requestPointerLock) {
-          document.mozFullScreenElement.requestPointerLock();
-        }
-
-        // Subscribe to events
-        document.addEventListener('mousemove', this._boundMove, false);
-        document.addEventListener('click', this._boundClick, false);
+  async _onClickFullscreenButton() {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else await document.webkitExitFullscreen();
+      } else {
+        const target = this.options.fullscreenTarget || this.playerElement;
+        if (target.requestFullscreen) await target.requestFullscreen();
+        else if (target.webkitRequestFullscreen) await target.webkitRequestFullscreen();
+        else throw new Error('当前浏览器不支持全屏，可使用浏览器的全屏模式');
       }
-    }
-    else {
-      this.playerElement.style.position = "relative";
-      this.fullScreenButtonElement.style.display = 'block';
+    } catch (error) { this.options.onFullscreenError?.(error); }
+  }
 
-      document.removeEventListener('mousemove', this._boundMove, false);
-      document.removeEventListener('click', this._boundClick, false);
+  _onFullscreenChange() {
+    const fullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!this.fullScreenButtonElement) return;
+    const label = fullscreen ? '退出全屏' : '进入全屏';
+    this.fullScreenButtonElement.title = label;
+    this.fullScreenButtonElement.setAttribute('aria-label', label);
+    this.fullScreenButtonElement.setAttribute('aria-pressed', String(!!fullscreen));
+    document.removeEventListener('mousemove', this._boundMove, false);
+    document.removeEventListener('click', this._boundClick, false);
+    if (fullscreen && this.lockMouseCheck?.checked) {
+      fullscreen.requestPointerLock?.();
+      document.addEventListener('mousemove', this._boundMove, false);
+      document.addEventListener('click', this._boundClick, false);
     }
+    this.resizeVideo();
   }
 
   _mouseMove(event) {
     // Forward mouseMove event of fullscreen player directly to sender
     // This is required, as the regular mousemove event doesn't fire when in fullscreen mode
-    this.sender._onMouseEvent(event);
+    this.sender?._onMouseEvent(event);
   }
 
   _mouseClick() {
     // Restores pointer lock when we unfocus the player and click on it again
-    if (this.lockMouseCheck.checked) {
+    if (this.lockMouseCheck?.checked) {
       if (this.videoElement.requestPointerLock) {
         this.videoElement.requestPointerLock().catch(function () { });
       }
@@ -109,15 +116,9 @@ export class VideoPlayer {
   }
 
   _mouseClickFullScreen() {
-    // Restores pointer lock when we unfocus the fullscreen player and click on it again
-    if (this.lockMouseCheck.checked) {
-      if (document.webkitFullscreenElement.requestPointerLock) {
-        document.webkitFullscreenElement.requestPointerLock();
-      } else if (document.fullscreenElement.requestPointerLock) {
-        document.fullscreenElement.requestPointerLock();
-      } else if (document.mozFullScreenElement.requestPointerLock) {
-        document.mozFullScreenElement.requestPointerLock();
-      }
+    if (this.lockMouseCheck?.checked) {
+      const fullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+      fullscreen?.requestPointerLock?.();
     }
   }
 
@@ -173,7 +174,10 @@ export class VideoPlayer {
     document.removeEventListener("webkitfullscreenchange", this._boundFullscreen);
     document.removeEventListener("mousemove", this._boundMove, false);
     document.removeEventListener("click", this._boundClick, false);
-    if (this.inputSenderChannel) this.inputSenderChannel.onopen = null;
+    if (this.inputSenderChannel) {
+      this.inputSenderChannel.onopen = null;
+      this.inputSenderChannel.onclose = null;
+    }
     this.videoElement?.srcObject?.getTracks().forEach(track => track.stop());
     this.sender?.dispose();
     if (this.inputRemoting) {
@@ -215,6 +219,8 @@ export class VideoPlayer {
     this.inputSenderChannel = channel;
     this.inputSenderChannel.onopen = this._onOpenInputSenderChannel.bind(this);
     this.inputRemoting.subscribe(new Observer(this.inputSenderChannel));
+    this.inputSenderChannel.onclose = () => this.inputRemoting?.stopSending();
+    if (channel.readyState === "open") this._onOpenInputSenderChannel();
   }
 
   async _onOpenInputSenderChannel() {

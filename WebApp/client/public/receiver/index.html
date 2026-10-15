@@ -1,53 +1,33 @@
-<!DOCTYPE HTML>
-<html>
-
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-  <link rel="icon" href="../images/favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="../css/main.css" />
-  <link rel="stylesheet" href="css/style.css" />
-  <title>Receiver Sample</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080c12">
+  <link rel="icon" href="../images/favicon.ico">
+  <link rel="stylesheet" href="css/style.css">
+  <title>Rokid 远程画面</title>
 </head>
-
 <body>
-
-  <div id="container">
-    <h1>Receiver Sample</h1>
-
-    <div id="warning" hidden="true"></div>
-
+  <main id="viewer" aria-label="Rokid 远程画面">
     <div id="player"></div>
-
-    <div class="box">
-      <span>Codec preferences:</span>
-      <select id="codecPreferences" autocomplete="off" disabled>
-        <option selected value="">Default</option>
-      </select>
-    </div>
-
-    <div class="box">
-      <span>Lock Cursor to Player:</span>
-      <input type="checkbox" id="lockMouseCheck" autocomplete="off" />
-    </div>
-
-    <p>
-      For more information about sample, see
-        <a href="https://docs.unity3d.com/Packages/com.unity.renderstreaming@3.1/manual/sample-broadcast.html">Broadcast sample</a> document page.
-    </p>
-
-    <div id="message"></div>
-
-    <section>
-      <a href="https://github.com/Unity-Technologies/UnityRenderStreaming/tree/develop/WebApp/client/public/receiver"
-        title="View source for this page on GitHub" id="viewSource">View source on GitHub</a>
+    <div id="liveBadge" hidden><span></span>实时画面</div>
+    <section id="connectionOverlay" aria-live="polite" role="status">
+      <div class="connection-card">
+        <div class="eyebrow">ROKID · 远程画面</div>
+        <div class="status-symbol" aria-hidden="true"></div>
+        <h1 id="stateTitle">正在连接</h1>
+        <p id="message">正在加载连接配置</p>
+        <progress id="connectionProgress" value="10" max="100" aria-label="连接进度"></progress>
+        <div class="actions">
+          <button id="resumePlayback" hidden>继续播放</button>
+          <button id="retryButton" hidden>立即重试</button>
+        </div>
+      </div>
     </section>
-  </div>
-
-  <script type="text/javascript" src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-  <script src="https://unpkg.com/event-target@latest/min.js"></script>
-  <script src="https://unpkg.com/resize-observer-polyfill@1.5.0/dist/ResizeObserver.global.js"></script>
+    <div id="notice" role="alert" hidden></div>
+  </main>
+  <noscript>请开启 JavaScript 以连接 Rokid 远程画面。</noscript>
   <script type="module" src="js/main.js"></script>
-
 </body>
-
 </html>

@@ -33,6 +33,18 @@ export class ReceiverSession {
     this._disposeAttempt();
   }
 
+  retry() { this._retry('正在重新连接', true); }
+
+  async resumePlayback() {
+    const attempt = this.attempt;
+    if (await this.player.playVideo() && this.attempt === attempt) {
+      attempt.blocked = false;
+      attempt.started = attempt.lastFrame = performance.now();
+      attempt.playing = false;
+      this.onState('buffering', '正在恢复视频播放');
+    }
+  }
+
   _disposeAttempt() {
     const attempt = this.attempt;
     this.attempt = null;
@@ -45,7 +57,17 @@ export class ReceiverSession {
   async _connect() {
     if (!this.active || this.attempt) return;
     this.onState('connecting', '正在连接信令服务器');
-    this.player.createPlayer(this.container, { checked: false });
+    this.player.createPlayer(this.container, { checked: false }, {
+      autoplay: true, muted: true, fullscreenTarget: this.options.fullscreenTarget,
+      onFullscreenError: this.options.onFullscreenError,
+      onPlaybackError: error => {
+        if (!this.attempt) return;
+        if (error.name === 'NotAllowedError') {
+          this.attempt.blocked = true;
+          this.onState('blocked', '浏览器阻止了自动播放，请点击继续播放');
+        } else this._retry('视频播放失败，请检查浏览器的视频解码支持');
+      }
+    });
     const signaling = new WebSocketSignaling();
     const stream = new RenderStreaming(signaling, this.config);
     const attempt = { stream, started: performance.now(), lastFrame: performance.now(),
@@ -58,14 +80,18 @@ export class ReceiverSession {
     stream.onDisconnect = () => failed('Rokid 视频或输入连接已断开');
     stream.onConnect = () => {
       if (!current()) return;
-      this.player.setupInput(stream.createDataChannel('input'));
+      const channel = stream.createDataChannel('input');
+      this.player.setupInput(channel);
+      channel.addEventListener('close', () => failed('远程操作通道已断开'));
       this.onState('waiting', '服务器已连接，等待 Rokid 推流');
     };
     stream.onTrackEvent = data => {
       if (!current()) { data.track.stop(); return; }
       this.player.addTrack(data.track);
-      data.track.addEventListener('ended', () => failed('视频轨道已结束'));
-      this.onState('buffering', '已收到视频轨道，正在等待首帧');
+      if (data.track.kind === 'video') {
+        data.track.addEventListener('ended', () => failed('视频轨道已结束'));
+        if (!attempt.playing) this.onState('buffering', '已收到视频轨道，正在等待首帧');
+      }
     };
     try {
       await stream.start();
@@ -102,7 +128,7 @@ export class ReceiverSession {
       }
       attempt.frames = decoded;
       attempt.received = received;
-      if (!attempt.playing && now - attempt.started > this.options.firstFrameTimeout)
+      if (!attempt.playing && !attempt.blocked && now - attempt.started > this.options.firstFrameTimeout)
         this._retry('等待视频首帧超时，请确认 Rokid 应用已启动且网络互通');
       else if (attempt.playing && now - attempt.lastFrame > this.options.frameTimeout)
         this._retry(now - attempt.lastReceived > this.options.frameTimeout
