@@ -13,7 +13,7 @@ try {
     }
     & npm.cmd run build
     if ($LASTEXITCODE -ne 0) { throw 'Server build failed.' }
-    Write-Host "Receiver: http://localhost:$Port/receiver/index.html (use this PC's LAN address on the tablet)"
+    Write-Host "Receiver: http://localhost:$Port/receiver/index.html (use this PC's LAN address on the receiving device)"
     & node build/index.js -p $Port -t websocket -m public
     if ($LASTEXITCODE -ne 0) { throw 'Server exited with an error. Check whether the port is in use.' }
 } finally { Pop-Location }

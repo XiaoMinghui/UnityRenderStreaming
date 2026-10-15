@@ -6,7 +6,7 @@ const overlay = document.getElementById('connectionOverlay');
 const progress = document.getElementById('connectionProgress');
 const retry = document.getElementById('retryButton');
 const resume = document.getElementById('resumePlayback');
-const titles = { connecting: '正在连接', waiting: '等待 Rokid 画面', buffering: '正在加载画面',
+const titles = { connecting: '正在连接', waiting: '等待推流端画面', buffering: '正在加载画面',
   playing: '正在串流', retrying: '连接中断，正在重试', blocked: '等待播放许可', error: '暂时无法连接' };
 const stages = { connecting: 20, waiting: 45, buffering: 80, playing: 100, retrying: 15 };
 let session, setupTimer, setupController, generation = 0, active = true;

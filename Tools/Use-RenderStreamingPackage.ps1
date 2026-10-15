@@ -8,7 +8,7 @@ param(
 
     [string]$SourcePath = (Split-Path -Parent $PSScriptRoot),
 
-    [string]$Revision = 'rokid-maintained'
+    [string]$Revision = 'renderstreaming-maintained'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -77,13 +77,13 @@ export class ReceiverSession {
     const failed = reason => { if (current()) this._retry(reason); };
     signaling.addEventListener('close', () => failed('与服务器的连接已中断'));
     signaling.addEventListener('servererror', e => failed(`信令异常：${e.detail.message}`));
-    stream.onDisconnect = () => failed('Rokid 视频或输入连接已断开');
+    stream.onDisconnect = () => failed('推流端视频或输入连接已断开');
     stream.onConnect = () => {
       if (!current()) return;
       const channel = stream.createDataChannel('input');
       this.player.setupInput(channel);
       channel.addEventListener('close', () => failed('远程操作通道已断开'));
-      this.onState('waiting', '服务器已连接，等待 Rokid 推流');
+      this.onState('waiting', '服务器已连接，等待推流端发送画面');
     };
     stream.onTrackEvent = data => {
       if (!current()) { data.track.stop(); return; }
@@ -129,7 +129,7 @@ export class ReceiverSession {
       attempt.frames = decoded;
       attempt.received = received;
       if (!attempt.playing && !attempt.blocked && now - attempt.started > this.options.firstFrameTimeout)
-        this._retry('等待视频首帧超时，请确认 Rokid 应用已启动且网络互通');
+        this._retry('等待视频首帧超时，请确认推流端应用已启动且网络互通');
       else if (attempt.playing && now - attempt.lastFrame > this.options.frameTimeout)
         this._retry(now - attempt.lastReceived > this.options.frameTimeout
           ? '视频数据传输中断' : '仍在接收数据，但画面停止解码');

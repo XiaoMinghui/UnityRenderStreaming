@@ -9,6 +9,10 @@ This solution's streaming technology takes advantage of [WebRTC](https://webrtc.
 
 <img src="com.unity.renderstreaming/Documentation~/images/browser_hdrpscene.png" width=500 align=center>
 
+## Maintained fork
+
+See [Maintenance and shared package setup](MAINTENANCE.md) for the maintained branch, server startup, connection recovery, receiver behavior and validation commands. Common streaming functionality is shared across Unity applications; device and business integrations remain in consuming projects.
+
 ## Requirements
 
 Please see [Requirements](com.unity.renderstreaming/Documentation~/index.md#requirements) section.
